@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+<title>Bola Climb - Downfall Physics</title>
+<style>
+  body {margin:0; display:flex; justify-content:center; align-items:center; height:100vh; background:#f0f0f0;}
+  canvas {border:1px solid black; touch-action:none; background:#fff;}
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<img id="basketImage" src="https://raw.githubusercontent.com/Wongbase17/Abd/refs/heads/main/1758785455798.png" style="display:none;">
+<script>
+const canvas=document.getElementById('gameCanvas');
+const ctx=canvas.getContext('2d');
+const basketImage=document.getElementById('basketImage');
+
+const GRAVITY=0.3;
+const JUMP_FORCE=-8;
+const FRICTION=0.98;
+
+let score=0, level=1;
+let ball={x:200,y:500,radius:20,vx:0,vy:JUMP_FORCE};
+let safeLine={x:140,y:580,width:120,height:20};
+const basket={x:150,y:50,width:100,height:50};
+let paths=[], isDrawing=false, currentPath=[], maxLength=160;
+let gameWon=false;
+
+function initialPath(points){
+  const cx=points.reduce((s,p)=>s+p.x,0)/points.length;
+  const cy=points.reduce((s,p)=>s+p.y,0)/points.length;
+  return {points:points, x:cx, y:cy, vy:0, angle:0, angularVelocity:0, mass:points.length};
+}
+
+function resetGame(showPopup=false){
+  if(showPopup) alert("Game Over!\nScore: "+score);
+  ball={x:200,y:500,radius:20,vx:0,vy:JUMP_FORCE};
+  paths=[]; currentPath=[]; isDrawing=false; gameWon=false;
+  level=1; score=0;
+  safeLine.width=120; safeLine.x=(canvas.width-safeLine.width)/2;
+}
+
+function nextLevel(){
+  score+=100; level++;
+  alert("You Win!\nScore: "+score+"\nNaik ke Level "+level);
+  ball={x:200,y:500,radius:20,vx:0,vy:JUMP_FORCE};
+  paths=[]; currentPath=[]; isDrawing=false; gameWon=false;
+  safeLine.width=Math.max(60,safeLine.width-10);
+  safeLine.x=(canvas.width-safeLine.width)/2;
+}
+
+function getCoordinates(e){
+  const rect=canvas.getBoundingClientRect();
+  if(e.type.startsWith('touch')){
+    const t=e.touches[0]||e.changedTouches[0];
+    return {x:t.clientX-rect.left,y:t.clientY-rect.top};
+  } else return {x:e.offsetX??e.clientX-rect.left, y:e.offsetY??e.clientY-rect.top};
+}
+
+function startDraw(e){ isDrawing=true; currentPath=[getCoordinates(e)]; }
+function moveDraw(e){
+  if(!isDrawing) return;
+  const pos=getCoordinates(e); currentPath.push(pos);
+  if(currentPath.length>maxLength) endDraw(e);
+  drawScene();
+}
+function endDraw(e){
+  if(!isDrawing) return;
+  currentPath.push(getCoordinates(e));
+  if(currentPath.length>1) paths.push(initialPath([...currentPath]));
+  isDrawing=false; currentPath=[];
+  drawScene();
+}
+
+canvas.addEventListener('mousedown',startDraw);
+canvas.addEventListener('mousemove',moveDraw);
+canvas.addEventListener('mouseup',endDraw);
+canvas.addEventListener('touchstart',e=>{e.preventDefault();startDraw(e)});
+canvas.addEventListener('touchmove',e=>{e.preventDefault();moveDraw(e)});
+canvas.addEventListener('touchend',e=>{e.preventDefault();endDraw(e)});
+
+// Bola collision
+function collideWithLine(p1,p2){
+  const A=p2.y-p1.y;
+  const B=p1.x-p2.x;
+  const C=A*p1.x+B*p1.y;
+  const denom=Math.sqrt(A*A+B*B);
+  if(!denom) return;
+  const dist=Math.abs(A*ball.x+B*ball.y-C)/denom;
+  if(dist<=ball.radius){
+    const minX=Math.min(p1.x,p2.x)-ball.radius;
+    const maxX=Math.max(p1.x,p2.x)+ball.radius;
+    const minY=Math.min(p1.y,p2.y)-ball.radius;
+    const maxY=Math.max(p1.y,p2.y)+ball.radius;
+    if(ball.x>=minX && ball.x<=maxX && ball.y>=minY && ball.y<=maxY && ball.vy>0){
+      const nx=A/denom, ny=B/denom;
+      const dot=ball.vx*nx+ball.vy*ny;
+      ball.vx-=2*dot*nx; ball.vy-=2*dot*ny;
+      const len=Math.sqrt(ball.vx*ball.vx+ball.vy*ball.vy);
+      if(len>0){ ball.vx=0; ball.vy=(ball.vy/len)*6; }
+    }
+  }
+}
+
+// Collision antar path
+function pathCollision(pathA,pathB){
+  for(let pa of pathA.points){
+    for(let pb of pathB.points){
+      const dx=pa.x-pb.x;
+      const dy=pa.y-pb.y;
+      if(Math.sqrt(dx*dx+dy*dy)<5) return true;
+    }
+  }
+  return false;
+}
+
+function update(){
+  if(gameWon){ drawScene(); requestAnimationFrame(update); return; }
+
+  // Bola
+  ball.vy+=GRAVITY; ball.y+=ball.vy;
+  if(ball.x-ball.radius<0){ ball.x=ball.radius; }
+  if(ball.x+ball.radius>canvas.width){ ball.x=canvas.width-ball.radius; }
+  if(ball.y+ball.radius>=safeLine.y && ball.y<=safeLine.y+safeLine.height && ball.x>=safeLine.x && ball.x<=safeLine.x+safeLine.width && ball.vy>0){
+    ball.y=safeLine.y-ball.radius; ball.vy=JUMP_FORCE;
+  }
+  if(ball.y-ball.radius>canvas.height) resetGame(true);
+
+  // Update paths jatuh ke bawah
+  for(let i=paths.length-1;i>=0;i--){
+    let path=paths[i];
+    path.vy+=GRAVITY; path.vy*=FRICTION;
+    path.y+=path.vy;
+
+    // Rotasi alami
+    path.angularVelocity+=(Math.random()-0.5)*0.002;
+    path.angle+=path.angularVelocity; path.angularVelocity*=0.98;
+
+    // Collision dinding
+    const minX=Math.min(...path.points.map(p=>p.x-path.x));
+    const maxX=Math.max(...path.points.map(p=>p.x-path.x));
+    if(path.x+minX<0){ path.x=-minX; path.angularVelocity=0; }
+    if(path.x+maxX>canvas.width){ path.x=canvas.width-maxX; path.angularVelocity=0; }
+
+    // Collision landasan hijau
+    const maxY=Math.max(...path.points.map(p=>p.y-path.y))+path.y;
+    if(maxY>=safeLine.y && path.vy>0){ path.y-=(maxY-safeLine.y); path.vy=0; }
+
+    // Collision antar path
+    for(let j=0;j<paths.length;j++){
+      if(i===j) continue;
+      if(pathCollision(path, paths[j])){
+        path.vy=0; path.angularVelocity=0;
+      }
+    }
+
+    // Hilang ke jurang
+    if(Math.max(...path.points.map(p=>p.y))>canvas.height+50) paths.splice(i,1);
+
+    // Update titik sesuai rotasi
+    const cos=Math.cos(path.angle), sin=Math.sin(path.angle);
+    path.points.forEach(p=>{
+      const dx=p.x-path.x, dy=p.y-path.y;
+      p.x=path.x+dx*cos-dy*sin;
+      p.y=path.y+dx*sin+dy*cos;
+    });
+  }
+
+  // Bola collision dengan path
+  for(let path of paths){
+    for(let i=0;i<path.points.length-1;i++){
+      collideWithLine({x:path.points[i].x,y:path.points[i].y},{x:path.points[i+1].x,y:path.points[i+1].y});
+    }
+  }
+
+  // Win check
+  if(ball.vy>0 && ball.x>basket.x && ball.x<basket.x+basket.width && ball.y+ball.radius>=basket.y && ball.y+ball.radius<=basket.y+basket.height){
+    ball.vy=0; ball.y=basket.y+basket.height-ball.radius; gameWon=true; nextLevel();
+  }
+
+  drawScene();
+  requestAnimationFrame(update);
+}
+
+function drawScene(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="green";
+  ctx.fillRect(safeLine.x,safeLine.y,safeLine.width,safeLine.height);
+
+  ctx.fillStyle="black";
+  ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.radius,0,Math.PI*2); ctx.fill();
+
+  if(basketImage.complete) ctx.drawImage(basketImage,basket.x,basket.y,basket.width,basket.height);
+
+  ctx.strokeStyle="blue"; ctx.lineWidth=5;
+  for(let path of paths){
+    if(path.points.length<2) continue;
+    ctx.beginPath();
+    ctx.moveTo(path.points[0].x,path.points[0].y);
+    for(let i=1;i<path.points.length;i++) ctx.lineTo(path.points[i].x,path.points[i].y);
+    ctx.stroke();
+  }
+
+  if(isDrawing && currentPath.length>1){
+    ctx.beginPath(); ctx.moveTo(currentPath[0].x,currentPath[0].y);
+    for(let i=1;i<currentPath.length;i++) ctx.lineTo(currentPath[i].x,currentPath[i].y);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle="black"; ctx.font="16px Arial";
+  ctx.fillText("Score: "+score,10,20);
+  ctx.fillText("Level: "+level,10,40);
+  ctx.font="14px Arial"; ctx.fillStyle="rgba(0,0,0,0.3)"; ctx.textAlign="right";
+  ctx.fillText("source by: ton-x cryptoiz",canvas.width-10,20);
+}
+
+update();
+</script>
+</body>
+</html>
